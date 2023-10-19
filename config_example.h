@@ -1,3 +1,4 @@
+// Haz una copia de este archivo en config.h y reemplaza las configuraciones necesarias
 #ifndef CONFIG_H
 #define CONFIG_H
 
