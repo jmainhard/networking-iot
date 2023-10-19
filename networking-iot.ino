@@ -36,6 +36,13 @@ uint32_t previousStateChange;
 constexpr int16_t telemetrySendInterval = 2000U;
 uint32_t previousDataSend;
 
+// WiFi Attributes
+String bssid;
+int32_t rssi;
+String ssid;
+IPAddress ip;
+String macAddress;
+
 // List of shared attributes for subscribing to their updates
 constexpr std::array<const char *, 2U> SHARED_ATTRIBUTES_LIST = {
   LED_STATE_ATTR,
@@ -124,6 +131,7 @@ void processSharedAttributes(const Shared_Attribute_Data &data) {
     } else if (strcmp(it->key().c_str(), LED_STATE_ATTR) == 0) {
       ledState = it->value().as<bool>();
       digitalWrite(LED_BUILTIN, ledState ? HIGH : LOW);
+      digitalWrite(ALARM_PIN_LED, ledState ? HIGH : LOW);
       Serial.print("Updated state to: ");
       Serial.println(ledState);
     }
@@ -145,7 +153,7 @@ const Attribute_Request_Callback attribute_shared_request_callback(SHARED_ATTRIB
 const Attribute_Request_Callback attribute_client_request_callback(CLIENT_ATTRIBUTES_LIST.cbegin(), CLIENT_ATTRIBUTES_LIST.cend(), &processClientAttributes);
 
 // Get the MAC address String
-String macAddress() {
+String macAddressString() {
   byte mac[6];
   WiFi.macAddress(mac);
   // Convert MAC address to string
@@ -159,13 +167,35 @@ String macAddress() {
   return macAddress;
 }
 
+String ipToString(IPAddress ip) {
+  String result;
+  for (int i = 0; i < 4; i++) {
+    result += String(ip[i]);
+    if (i < 3) {
+      result += ".";
+    }
+  }
+  return result;
+}
+
 
 void setup() {
   // Initalize serial connection for debugging
   Serial.begin(SERIAL_DEBUG_BAUD);
   pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(ALARM_PIN_LED, OUTPUT);
   delay(1000);
+
   InitWiFi();
+  uint8_t bssidBytes[6];
+  char bssidStr[18] = {0};
+  WiFi.BSSID(bssidBytes);
+  sprintf(bssidStr, "%02X:%02X:%02X:%02X:%02X:%02X", bssidBytes[0], bssidBytes[1], bssidBytes[2], bssidBytes[3], bssidBytes[4], bssidBytes[5]);
+  bssid = String(bssidStr);
+  rssi = WiFi.RSSI();
+  ssid = WiFi.SSID();
+  ip = WiFi.localIP();
+  macAddress = macAddressString();
 }
 
 void loop() {
@@ -188,8 +218,12 @@ void loop() {
       return;
     }
 
-    // Send the MAC address as an attribute
-    tb.sendAttributeData("macAddress", macAddress().c_str());
+    // Send the WiFi data as an attribute
+    tb.sendAttributeData("macAddress", macAddress.c_str());
+    tb.sendAttributeData("rssi", rssi);
+    tb.sendAttributeData("ssid", ssid.c_str());
+    tb.sendAttributeData("bssid", bssid.c_str());
+    tb.sendAttributeData("localIp", ipToString(ip).c_str());
   }
 
   if (!subscribed) {
@@ -234,33 +268,32 @@ void loop() {
     tb.sendAttributeData(LED_STATE_ATTR, ledState);
   }
 
+  sensor = analogRead(A1) - 130;
+  // Serial.print("sensor: ");
+  // Serial.println(sensor);
+
   if (ledMode == 1 && millis() - previousStateChange > blinkingInterval) {
     previousStateChange = millis();
     ledState = !ledState;
     digitalWrite(LED_BUILTIN, ledState);
+    digitalWrite(ALARM_PIN_LED, ledState);
+    tone(A2, 5000, 100);
     tb.sendTelemetryData(LED_STATE_ATTR, ledState);
     tb.sendAttributeData(LED_STATE_ATTR, ledState);
-    if (LED_BUILTIN == 99) {
+    if (LED_BUILTIN == 6) {
       Serial.print("LED state changed to: ");
       Serial.println(ledState);
     }
   }
 
+  if (sensor >= 250) {
+    ledMode = 1;
+  }
+
   // Sending telemetry every telemetrySendInterval time
   if (millis() - previousDataSend > telemetrySendInterval) {
     previousDataSend = millis();
-    // tb.sendTelemetryData("temperature", 1l);
-  }
-
-  sensor = analogRead(A1) - 130;
-  Serial.print("sensor: ");
-  Serial.println(sensor);
-  if (sensor >= 250) {
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(500);
-    tone(A2, 4500, 100);
-    delay(2000);
-    digitalWrite(LED_BUILTIN, LOW);
+    tb.sendTelemetryData("co", sensor);
   }
 
   tb.loop();
